@@ -1,0 +1,13 @@
+[package]
+name = "metadata"
+version = "0.1.0"
+edition = "2021"
+authors = ["PCT <someemail@suse.com"]
+
+[dependencies]
+clap = {version = "*", features = ["yaml"]}
+yaml-rust = "*"
+hyper = "0.10"
+# error-chain = "*"
+serde = "*"
+serde_yaml = "*"
