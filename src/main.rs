@@ -95,43 +95,47 @@ fn fetch_options(url: &str, map: &mut HashMap<String, String>) {
     }
 }
 
-fn swrite_args_yaml(options: HashMap<String, String>) {
-    let spaces = "    ";
+fn write_args_yaml(options: &mut HashMap<String, String>) {
     let cli_args =
         "name: metadata
 version: \"1.0\"
 author: Public Cloud Team <some_email_pct@suse.com>
 about: Get instance metadata - this is a test
 args:
-    - xml:
-        long: xml
-        required: false
-        takes_value: false
-        help: Show output as XML
-    - multiple-options:
-        long: multiple-options
-        required: false
-        takes_value: false
-        help: Combine multiple options in the command. Default false.
+  - api:
+      long: api
+      required: false
+      takes_value: true
+      help: Version of the API
+  - xml:
+      long: xml
+      required: false
+      takes_value: false
+      help: Show output as XML
+  - multiple-options:
+      long: multiple-options
+      required: false
+      takes_value: false
+      help: Combine multiple options in the command. Default false.
 ";
-    let mut cli_argsa: String = "".to_string();
-    // for (option, option_url) in map.iter() {
-    // for option in options {
-    //     if option.is_empty() || option.contains("0=jesus_ec2") {
-    //         continue;
-    //     }
+    let mut cli_args_formatted: String = "".to_string();
+    let spaces = "  ";
+    for (option, option_url) in options.iter() {
+        if option.is_empty() || option.starts_with("0") {
+            continue;
+        }
 
-    //     let arg = format!(
-    //         "{}- {}:\n{}long: {}\n{}takes_value: false\n{}required: false\n{}help: Get {} from metadata\n",
-    //         spaces, option, spaces.repeat(2), option, spaces.repeat(2),
-    //         spaces.repeat(2), spaces.repeat(2), option);
-    //     cli_argsa = format!("{}{}", cli_argsa, arg);
-    // }
-    cli_argsa = format!("{}{}", cli_args, cli_argsa);
-    fs::write(YAML_FILE, cli_argsa);
+        let arg = format!(
+            "{}- {}:\n{}long: {}\n{}takes_value: false\n{}required: false\n{}help: Get {} from metadata\n",
+            spaces, option, spaces.repeat(3), option, spaces.repeat(3),
+            spaces.repeat(3), spaces.repeat(3), option);
+        cli_args_formatted = format!("{}{}", cli_args_formatted, arg);
+    }
+    cli_args_formatted = format!("{}{}", cli_args, cli_args_formatted);
+    fs::write(YAML_FILE, cli_args_formatted);
 }
 
-fn get_args(version: &str) -> HashMap<String, String> {
+fn get_args_from_framework(version: &str) -> HashMap<String, String> {
     let vect = vec!["dynamic", "meta-data"];
     let mut map: HashMap<String, String> = HashMap::new();
     for endpoint in vect.iter() {
@@ -142,75 +146,35 @@ fn get_args(version: &str) -> HashMap<String, String> {
         }
         fetch_options(&url, &mut map);
     }
-    let spaces = "    ";
-
-    let cli_args =
-        "name: metadata
-version: \"1.0\"
-author: Public Cloud Team <some_email_pct@suse.com>
-about: Get instance metadata - this is a test
-args:
-    - xml:
-        long: xml
-        required: false
-        takes_value: false
-        help: Show output as XML
-    - multiple-options:
-        long: multiple-options
-        required: false
-        takes_value: false
-        help: Combine multiple options in the command. Default false.
-";
-    let mut cli_argsa: String = "".to_string();
-    for (option, option_url) in map.iter() {
-        if option.is_empty() || option.contains("0=jesus_ec2") {
-            continue;
-        }
-
-        let arg = format!(
-            "{}- {}:\n{}long: {}\n{}takes_value: false\n{}required: false\n{}help: Get {} from metadata\n",
-            spaces, option, spaces.repeat(2), option, spaces.repeat(2),
-            spaces.repeat(2), spaces.repeat(2), option);
-        cli_argsa = format!("{}{}", cli_argsa, arg);
-    }
-    cli_argsa = format!("{}{}", cli_args, cli_argsa);
-    fs::write(YAML_FILE, cli_argsa);
+    write_args_yaml(&mut map);
     return map;
 }
 
 fn main() {
     // get all arguments passed to app
     let args: Vec<_> = std::env::args().collect();
-    // Define command line arguments.
-    let foo = get_api_versions();
-    let versions: Vec<&str> = foo.lines().collect();
+    // define command line arguments.
+    let api_versions = get_api_versions();
+    let versions: Vec<&str> = api_versions.lines().collect();
 
     let mut map: HashMap<String, String> = HashMap::new();
-    // println!("{:?}", versions);
     // check api version
-    // in order to know wich YAML generate
+    // in order to know which YAML generate
     if args.contains(&"--api".to_string()) {
         let index = args.iter().position(|r| r == "--api").unwrap();
         if (args.len() - 1) <= index {
             // get standard args in YAML
-            map = get_args("2008-02-01");
+            map = get_args_from_framework("2008-02-01");
         } else {
-            map = get_args(&args[index + 1]); // get the args for that API version
-            // USE VERSION YAML
-            // let yaml = clap::load_yaml!("/tmp/foo.yaml");
-            // let yaml = clap::load_yaml!("cli2.yaml");
-            // let matches = App::from_yaml(&yaml).get_matches();
+            map = get_args_from_framework(&args[index + 1]); // get the args for that API version
         }
     } else {
-        map = get_args("2008-02-01");
+        map = get_args_from_framework("2008-02-01");
     }
     let yaml = clap::load_yaml!("/tmp/foo.yaml");
     let matches = App::from_yaml(yaml).get_matches();
 
-    // TODO: USE STANDARD CLI YAML
-    // yaml = clap::load_yaml!("/tmp/foo.yaml");
-    // let matches = App::from_yaml(yaml).get_matches();
-    // Get value for API, or default to 'latest'
+    // get value for API, or default to 'latest'
     let api_version = matches.value_of("api").unwrap_or("latest");
     let xml = matches.is_present("xml");
     let pkcs7 = matches.is_present("pkcs7");
