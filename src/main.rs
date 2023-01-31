@@ -24,15 +24,15 @@ fn _make_query(url: &str) -> String {
     if response.status != StatusCode::Ok {
         return response.status.to_string();
     }
-    let mut buf = String::new();
-    match response.read_to_string(&mut buf) {
+    let mut result = String::new();
+    match response.read_to_string(&mut result) {
         Ok(_) => (),
         Err(e) => {
             println!("Error! {}", e);
             return "".to_string(); // TODO: RETURN PROPER ERROR
         }
     };
-    return buf;
+    return result;
 }
 
 fn get_metadata(api_version: &str, entry: &str) -> String {
@@ -42,7 +42,6 @@ fn get_metadata(api_version: &str, entry: &str) -> String {
         api_version,
         entry
     );
-    println!("QUERYRING {}", url);
     return _make_query(&url);
 }
 
@@ -91,6 +90,22 @@ fn fetch_options(url: &str, map: &mut HashMap<String, String>) {
             } else {
                 map.insert(option.to_string(), url.to_owned() + "/" + &option);
             }
+        }
+    }
+}
+
+fn display(args: Vec<String>, map: HashMap<String, String>, matches: ArgMatches) {
+    // get value for API, or default to 'latest'
+    // let api_version = matches.value_of("api").unwrap_or("latest");
+    let xml = matches.is_present("xml");
+    // let pkcs7 = matches.is_present("pkcs7");
+    // let signature = matches.is_present("signature");
+    for element in args {
+        let arg = &element[2..];
+        if map.contains_key(arg) {
+            let url = map.get_key_value(arg);
+            let response = _make_query(&url.unwrap().1);
+            display_data(arg, response.as_str(), xml);
         }
     }
 }
@@ -173,26 +188,9 @@ fn main() {
     }
     let yaml = clap::load_yaml!("/tmp/foo.yaml");
     let matches = App::from_yaml(yaml).get_matches();
-
-    // get value for API, or default to 'latest'
-    let api_version = matches.value_of("api").unwrap_or("latest");
-    let xml = matches.is_present("xml");
-    let pkcs7 = matches.is_present("pkcs7");
-    let signature = matches.is_present("signature");
     // show results if any
     if !map.is_empty() {
-        for element in args {
-            let arg = &element[2..];
-            if map.contains_key(arg) {
-                let foo = map.get_key_value(arg);
-                let result = _make_query(&foo.unwrap().1);
-                display_data(arg, result.as_str(), xml);
-                // one result at the time
-                if !matches.is_present("multiple-options") {
-                    return ();
-                }
-            }
-            }
+        display(args, map, matches);
     }
     println!("Hello, world!");
 }
