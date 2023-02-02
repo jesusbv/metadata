@@ -1,14 +1,11 @@
-use clap::{Arg, App, ArgMatches};
-use hyper::Client;
+use clap::{App, Arg, Error};
 use hyper::status::StatusCode;
-use std::io::Read;
-use yaml_rust::yaml::{Yaml, YamlLoader};
-use yaml_rust::YamlEmitter;
-use std::fs;
+use hyper::Client;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::io::Read;
+// use std::path::{Path, PathBuf};
 
-static YAML_FILE: &str = "/tmp/foo.yaml";
+// static YAML_FILE: &str = "/tmp/foo.yaml";
 static METADATA_URL: &str = "http://169.254.169.254/";
 
 fn _make_query(url: &str) -> String {
@@ -22,6 +19,9 @@ fn _make_query(url: &str) -> String {
     };
 
     if response.status != StatusCode::Ok {
+        // println!("{:?}", response.status);
+        // println!("{:?}", response.status.to_string());
+        // println!("{:?}", url);
         return response.status.to_string();
     }
     let mut result = String::new();
@@ -35,162 +35,234 @@ fn _make_query(url: &str) -> String {
     return result;
 }
 
-fn get_metadata(api_version: &str, entry: &str) -> String {
-    let url = format!(
-        "{}{}/meta-data/{}",
-        METADATA_URL,
-        api_version,
-        entry
-    );
-    return _make_query(&url);
-}
-
-fn display_data(entry: &str, data: &str, xml: bool) {
-    let response: String;
+fn display_data(entry: String, data: String, xml: bool, all_info: bool) {
+    let mut response: String = format!("{}", data);
     if xml {
-        response = format!(
-            "<{}>{}</{}>",
-            entry,
-            data,
-            entry
-        );
-    } else {
-        response = data.to_string();
+        response = format!("<{}>{}</{}>", entry, data, entry);
     }
+    if all_info {
+        response = format!("{}: {}", entry, data);
+    }
+
     println!("{} ", response);
 }
+
 fn get_api_versions() -> String {
     return _make_query(METADATA_URL);
 }
 
-fn fetch_options(url: &str, map: &mut HashMap<String, String>) {
-    let foo = _make_query(&url);
-    if foo.contains("Not Found") {
+fn fetch_options(
+    url: &str,
+    map: &mut HashMap<String, String>,
+    args: &mut Vec<String>,
+    all_info: bool,
+) {
+    if args.is_empty() && !all_info {
         return ();
     }
-    let mut options= foo.split("\n");
-    for option in options {
+
+    let options = _make_query(&url);
+
+    for option in options.split("\n") {
         if option.ends_with("/") {
-            if url.ends_with("/") {
-                fetch_options(
-                    &(url.to_owned() + &option),
-                    map
-                );
-            } else {
-                // TODO: change to
-                // &(Path::new(url.to_owned()).join(&option),
-                fetch_options(
-                    &(url.to_owned() + "/" + &option),
-                    map
-                );
+            let mut new_url = url.to_owned() + &option;
+            if !url.ends_with("/") {
+                new_url = url.to_owned() + "/" + &option;
             }
+            fetch_options(&(new_url), map, args, all_info);
         } else {
+            // get the value from the URL
+            let mut new_url = url.to_owned() + &option;
+
             if url.ends_with("/") {
-                map.insert(option.to_string(), url.to_owned() + &option);
+                let param = "--".to_owned() + option;
+                if args.contains(&"--public-keys".to_string())
+                    && option.contains("=")
+                    && url.contains("public-keys")
+                {
+                    let vec: &Vec<&str> = &vec![option.split("=").collect()][0];
+                    new_url = url.to_owned() + &vec[0] + "/openssh-key";
+                    let value = _make_query(&new_url);
+                    map.insert("public-keys".to_string(), value);
+                    if !all_info {
+                        let index = args.iter().position(|arg| *arg == "--public-keys").unwrap();
+                        args.remove(index);
+                    }
+                } else {
+                    if args.contains(&(param)) || all_info {
+                        let value = _make_query(&new_url);
+                        if !value.contains("Not Found") {
+                            map.insert(option.to_string(), value);
+                        }
+                        if !all_info {
+                            let index = args.iter().position(|arg| *arg == param).unwrap();
+                            args.remove(index);
+                        }
+                    }
+                }
             } else {
-                map.insert(option.to_string(), url.to_owned() + "/" + &option);
+                new_url = url.to_owned() + "/" + &option;
+                if all_info {
+                    let value = _make_query(&new_url);
+                    if !value.contains("Not Found") {
+                        map.insert(option.to_string(), value);
+                    }
+                }
             }
         }
-    }
-}
-
-fn display(args: Vec<String>, map: HashMap<String, String>, matches: ArgMatches) {
-    // get value for API, or default to 'latest'
-    // let api_version = matches.value_of("api").unwrap_or("latest");
-    let xml = matches.is_present("xml");
-    // let pkcs7 = matches.is_present("pkcs7");
-    // let signature = matches.is_present("signature");
-    for element in args {
-        let arg = &element[2..];
-        if map.contains_key(arg) {
-            let url = map.get_key_value(arg);
-            let response = _make_query(&url.unwrap().1);
-            display_data(arg, response.as_str(), xml);
+        if args.is_empty() && !all_info {
+            return ();
         }
     }
 }
 
-fn write_args_yaml(options: &mut HashMap<String, String>) {
-    let cli_args =
-        "name: metadata
-version: \"1.0\"
-author: Public Cloud Team <some_email_pct@suse.com>
-about: Get instance metadata - this is a test
-args:
-  - api:
-      long: api
-      required: false
-      takes_value: true
-      help: Version of the API
-  - xml:
-      long: xml
-      required: false
-      takes_value: false
-      help: Show output as XML
-  - multiple-options:
-      long: multiple-options
-      required: false
-      takes_value: false
-      help: Combine multiple options in the command. Default false.
-";
-    let mut cli_args_formatted: String = "".to_string();
-    let spaces = "  ";
-    for (option, option_url) in options.iter() {
-        if option.is_empty() || option.starts_with("0") {
-            continue;
-        }
-
-        let arg = format!(
-            "{}- {}:\n{}long: {}\n{}takes_value: false\n{}required: false\n{}help: Get {} from metadata\n",
-            spaces, option, spaces.repeat(3), option, spaces.repeat(3),
-            spaces.repeat(3), spaces.repeat(3), option);
-        cli_args_formatted = format!("{}{}", cli_args_formatted, arg);
+fn display(map: HashMap<String, String>, xml: bool, all_info: bool) {
+    // check if indexmap has values() and keys ()
+    for (key, value) in map {
+        display_data(key, value, xml, all_info);
     }
-    cli_args_formatted = format!("{}{}", cli_args, cli_args_formatted);
-    fs::write(YAML_FILE, cli_args_formatted);
 }
 
-fn get_args_from_framework(version: &str) -> HashMap<String, String> {
+// fn write_args_yaml(options: &mut std::collections::hash_map::Keys<String, String>) {
+//     let cli_args = "name: metadata
+// version: \"1.0\"
+// author: Public Cloud Team <some_email_pct@domain.com>
+// about: Get instance metadata - this is a test
+// args:
+//   - api:
+//       long: api
+//       required: false
+//       takes_value: true
+//       help: Version of the API
+//   - xml:
+//       long: xml
+//       required: false
+//       takes_value: false
+//       help: Show output as XML
+//   - multiple-options:
+//       long: multiple-options
+//       required: false
+//       takes_value: false
+//       help: Combine multiple options in the command. Default false.
+// ";
+//     let mut cli_args_formatted: String = "".to_string();
+//     let spaces = "  ";
+//     for option in options {
+//         // if option.is_empty() || option.starts_with("0") {
+//         //     continue;
+//         // }
+
+//         let arg = format!(
+//             "{}- {}:\n{}long: {}\n{}takes_value: false\n{}required: false\n{}help: Get {} from metadata\n",
+//             spaces, option, spaces.repeat(3), option, spaces.repeat(3),
+//             spaces.repeat(3), spaces.repeat(3), option);
+//         cli_args_formatted = format!("{}{}", cli_args_formatted, arg);
+//     }
+//     cli_args_formatted = format!("{}{}", cli_args, cli_args_formatted);
+//     // fs::write(YAML_FILE, cli_args_formatted);
+//     std::io::stdout().flush().expect("Could not write ");
+// }
+
+fn get_args_from_framework(
+    version: &str,
+    args: &mut Vec<String>,
+    all_info: bool,
+) -> HashMap<String, String> {
     let vect = vec!["dynamic", "meta-data"];
     let mut map: HashMap<String, String> = HashMap::new();
     for endpoint in vect.iter() {
         let url = METADATA_URL.to_owned() + version + "/" + endpoint;
-        let foo = _make_query(&url);
-        if foo.contains("Not Found") {
-            continue;
-        }
-        fetch_options(&url, &mut map);
+        fetch_options(&url, &mut map, args, all_info);
     }
-    write_args_yaml(&mut map);
+    // write_args_yaml(&mut map.keys());
     return map;
 }
 
 fn main() {
     // get all arguments passed to app
-    let args: Vec<_> = std::env::args().collect();
+    let mut args: Vec<_> = std::env::args().collect();
+    // let super_arg: Vec<_> = std::env::args().collect();
+
+    args.remove(0);
     // define command line arguments.
     let api_versions = get_api_versions();
     let versions: Vec<&str> = api_versions.lines().collect();
 
-    let mut map: HashMap<String, String> = HashMap::new();
+    let mut map: HashMap<String, String>; // = HashMap::new();
+    let mut version_from_cli = Some(String::from("latest"));
+    let mut all_info = false;
     // check api version
     // in order to know which YAML generate
+    let mut xml: bool = false;
+    if args.contains(&"--xml".to_string()) {
+        xml = true;
+        let index = args.iter().position(|r| r == "--xml").unwrap();
+        args.remove(index);
+    }
     if args.contains(&"--api".to_string()) {
-        let index = args.iter().position(|r| r == "--api").unwrap();
-        if (args.len() - 1) <= index {
-            // get standard args in YAML
-            map = get_args_from_framework("2008-02-01");
+        if args.len() > 2 {
+            let index = args.iter().position(|r| r == "--api").unwrap();
+            Some(args.remove(index));
+            version_from_cli = Some(args.swap_remove(index));
+            // TODO: check version is a valid version with api_versions
+        }
+    }
+    if args.contains(&"-h".to_string()) {
+        let index = args.iter().position(|r| r == "-h").unwrap();
+        Some(args.remove(index));
+    }
+
+    if !args.is_empty() {
+        map = get_args_from_framework(&version_from_cli.clone().unwrap(), &mut args, all_info);
+        if args.is_empty() {
+            display(map, xml, all_info);
         } else {
-            map = get_args_from_framework(&args[index + 1]); // get the args for that API version
+            // Some params were not found
+            // Create App with ALL options
+            all_info = true;
+            map = get_args_from_framework(&version_from_cli.unwrap(), &mut args, all_info);
+            let mut all_options: Vec<Arg> = Vec::with_capacity(map.len());
+            let mut my_index = 0;
+            for param in map.keys() {
+                all_options.insert(
+                    my_index,
+                    Arg::with_name(&**param)
+                        .long(param)
+                        //.allow_hyphen_values(true)
+                        .help("Get {param} from metadata")
+                        .takes_value(false)
+                        .required(false),
+                );
+                my_index += 1;
+            }
+            let mut my_app = App::new("metadata")
+                .version("0.1.0")
+                .author("Jesus")
+                .args(all_options);
+            let maxi_help = my_app.print_help();
+            let my_message: Vec<&str> = args.iter().map(String::as_str).collect();
+            let pert = format!(
+                "{}{} {}\n{}\n",
+                "Found argument ",
+                &my_message.concat(),
+                "which wasn't expected, or isn't valid in this context.",
+                "Please, check help above"
+            );
+            match maxi_help {
+                Ok(_helpa) => {
+                    Error::with_description(pert, clap::ErrorKind::UnknownArgument).exit()
+                }
+                Err(e) => println!("PUES ERROR {e:?}"),
+            }
         }
     } else {
-        map = get_args_from_framework("2008-02-01");
-    }
-    let yaml = clap::load_yaml!("/tmp/foo.yaml");
-    let matches = App::from_yaml(yaml).get_matches();
-    // show results if any
-    if !map.is_empty() {
-        display(args, map, matches);
+        // metadata without params
+        //e.g. ec2metadata or ec2metadata --api <version>
+        // use user version for API if any or latest
+        // args.append(&mut vec![String::from("--api"), String::from("latest")]);
+        all_info = true;
+        map = get_args_from_framework(&version_from_cli.unwrap(), &mut args, all_info);
+        display(map, xml, all_info);
     }
     println!("Hello, world!");
 }

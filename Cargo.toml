@@ -2,10 +2,10 @@
 name = "metadata"
 version = "0.1.0"
 edition = "2021"
-authors = ["PCT <someemail@suse.com"]
+authors = ["PCT <someemail@domain.com"]
 
 [dependencies]
-clap = {version = "*", features = ["yaml"]}
+clap = {version = "*"}
 yaml-rust = "*"
 hyper = "0.10"
 # error-chain = "*"
