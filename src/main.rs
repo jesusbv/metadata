@@ -151,26 +151,49 @@ fn main() {
     // check api version
     let mut xml: bool = false;
     let mut api_help: bool = false;
-    let mut api_version: bool = false;
     let mut package_version: bool = false;
-    if args.contains(&"--xml".to_string()) {
-        xml = true;
-        let index = args.iter().position(|r| r == "--xml").unwrap();
-        args.remove(index);
+    if args.contains(&"--show-api-versions".to_string()) {
+        if args.len() > 1 {
+            let version_message = "The argument '--show-api-versions' cannot be used with any other argument\n\nFor more information try --help\n";
+            Error::with_description(
+                version_message.to_string(),
+                clap::ErrorKind::ArgumentConflict,
+            )
+            .exit();
+        } else {
+            println!("The available API versions are:");
+            for version in versions {
+                println!("{}", version);
+            }
+        }
+        return;
     }
     if args.contains(&"--api".to_string()) {
-        api_version = true;
         let index = args.iter().position(|r| r == "--api").unwrap();
         Some(args.remove(index));
         // TODO: check version is a valid version with api_versions
         if !args.is_empty() {
             // CHECK INDEX DOES NOT HAVE --
+            let possible_version = args.get(index).unwrap();
+            if possible_version.starts_with("--") || !versions.contains(&possible_version.as_str())
+            {
+                let api_message = format!(
+                    "The argument '--api <api>' requires a value, '{}' is not a valid value, to see the valid versions try --show-versions\n\nFor more information try --help \n",
+                    possible_version
+                );
+                Error::with_description(api_message, clap::ErrorKind::EmptyValue).exit();
+            }
             version_from_cli = Some(args.swap_remove(index));
         } else {
-            let foo =
+            let api_message =
                 String::from("The argument '--api <api>' requires a value but none was supplied\n\nFor more information try --help\n");
-            Error::with_description(foo, clap::ErrorKind::EmptyValue).exit();
+            Error::with_description(api_message, clap::ErrorKind::EmptyValue).exit();
         }
+    }
+    if args.contains(&"--xml".to_string()) {
+        xml = true;
+        let index = args.iter().position(|r| r == "--xml").unwrap();
+        args.remove(index);
     }
     if args.contains(&"-h".to_string()) || args.contains(&"--help".to_string()) {
         api_help = true;
@@ -188,7 +211,7 @@ fn main() {
             // Create App with ALL options
             all_info = true;
             map = get_args_from_framework(&version_from_cli.unwrap(), &mut args, all_info);
-            let mut all_options: Vec<Arg> = Vec::with_capacity(map.len() + 2);
+            let mut all_options: Vec<Arg> = Vec::with_capacity(map.len() + 3);
             let mut my_index = 0;
             for param in map.keys() {
                 all_options.insert(
@@ -216,6 +239,14 @@ fn main() {
                     .takes_value(false)
                     .required(false),
             );
+            all_options.insert(
+                map.len() + 2,
+                Arg::with_name("show_api_versions")
+                    .long("--show-api-versions")
+                    .help("Show the available versions to query the metadata")
+                    .takes_value(false)
+                    .required(false),
+            );
             let mut my_app = App::new("metadata")
                 .version("0.1.0")
                 .author("Jesus")
@@ -233,7 +264,7 @@ fn main() {
         if !api_help && !package_version {
             display(map, xml, all_info);
         } else {
-            let mut all_options: Vec<Arg> = Vec::with_capacity(map.len() + 2);
+            let mut all_options: Vec<Arg> = Vec::with_capacity(map.len() + 3);
             let mut my_index = 0;
             for param in map.keys() {
                 all_options.insert(
@@ -258,6 +289,14 @@ fn main() {
                 Arg::with_name("xml")
                     .long("--xml")
                     .help("Show the output in XML format")
+                    .takes_value(false)
+                    .required(false),
+            );
+            all_options.insert(
+                map.len() + 2,
+                Arg::with_name("show_api_versions")
+                    .long("--show-api-versions")
+                    .help("Show the available API versions")
                     .takes_value(false)
                     .required(false),
             );
