@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::io::Read;
 // use std::path::{Path, PathBuf};
 
-// static YAML_FILE: &str = "/tmp/foo.yaml";
 static METADATA_URL: &str = "http://169.254.169.254/";
 
 fn _make_query(url: &str) -> String {
@@ -123,46 +122,6 @@ fn display(map: HashMap<String, String>, xml: bool, all_info: bool) {
     }
 }
 
-// fn write_args_yaml(options: &mut std::collections::hash_map::Keys<String, String>) {
-//     let cli_args = "name: metadata
-// version: \"1.0\"
-// author: Public Cloud Team <some_email_pct@domain.com>
-// about: Get instance metadata - this is a test
-// args:
-//   - api:
-//       long: api
-//       required: false
-//       takes_value: true
-//       help: Version of the API
-//   - xml:
-//       long: xml
-//       required: false
-//       takes_value: false
-//       help: Show output as XML
-//   - multiple-options:
-//       long: multiple-options
-//       required: false
-//       takes_value: false
-//       help: Combine multiple options in the command. Default false.
-// ";
-//     let mut cli_args_formatted: String = "".to_string();
-//     let spaces = "  ";
-//     for option in options {
-//         // if option.is_empty() || option.starts_with("0") {
-//         //     continue;
-//         // }
-
-//         let arg = format!(
-//             "{}- {}:\n{}long: {}\n{}takes_value: false\n{}required: false\n{}help: Get {} from metadata\n",
-//             spaces, option, spaces.repeat(3), option, spaces.repeat(3),
-//             spaces.repeat(3), spaces.repeat(3), option);
-//         cli_args_formatted = format!("{}{}", cli_args_formatted, arg);
-//     }
-//     cli_args_formatted = format!("{}{}", cli_args, cli_args_formatted);
-//     // fs::write(YAML_FILE, cli_args_formatted);
-//     std::io::stdout().flush().expect("Could not write ");
-// }
-
 fn get_args_from_framework(
     version: &str,
     args: &mut Vec<String>,
@@ -174,45 +133,53 @@ fn get_args_from_framework(
         let url = METADATA_URL.to_owned() + version + "/" + endpoint;
         fetch_options(&url, &mut map, args, all_info);
     }
-    // write_args_yaml(&mut map.keys());
     return map;
 }
 
 fn main() {
     // get all arguments passed to app
     let mut args: Vec<_> = std::env::args().collect();
-    // let super_arg: Vec<_> = std::env::args().collect();
 
     args.remove(0);
     // define command line arguments.
     let api_versions = get_api_versions();
     let versions: Vec<&str> = api_versions.lines().collect();
 
-    let mut map: HashMap<String, String>; // = HashMap::new();
+    let mut map: HashMap<String, String>;
     let mut version_from_cli = Some(String::from("latest"));
     let mut all_info = false;
     // check api version
-    // in order to know which YAML generate
     let mut xml: bool = false;
+    let mut api_help: bool = false;
+    let mut api_version: bool = false;
+    let mut package_version: bool = false;
     if args.contains(&"--xml".to_string()) {
         xml = true;
         let index = args.iter().position(|r| r == "--xml").unwrap();
         args.remove(index);
     }
     if args.contains(&"--api".to_string()) {
-        if args.len() > 2 {
-            let index = args.iter().position(|r| r == "--api").unwrap();
-            Some(args.remove(index));
+        api_version = true;
+        let index = args.iter().position(|r| r == "--api").unwrap();
+        Some(args.remove(index));
+        // TODO: check version is a valid version with api_versions
+        if !args.is_empty() {
+            // CHECK INDEX DOES NOT HAVE --
             version_from_cli = Some(args.swap_remove(index));
-            // TODO: check version is a valid version with api_versions
+        } else {
+            let foo =
+                String::from("The argument '--api <api>' requires a value but none was supplied\n\nFor more information try --help\n");
+            Error::with_description(foo, clap::ErrorKind::EmptyValue).exit();
         }
     }
-    if args.contains(&"-h".to_string()) {
-        let index = args.iter().position(|r| r == "-h").unwrap();
-        Some(args.remove(index));
+    if args.contains(&"-h".to_string()) || args.contains(&"--help".to_string()) {
+        api_help = true;
+    }
+    if args.contains(&"-V".to_string()) || args.contains(&"--version".to_string()) {
+        package_version = true;
     }
 
-    if !args.is_empty() {
+    if !args.is_empty() && !api_help && !package_version {
         map = get_args_from_framework(&version_from_cli.clone().unwrap(), &mut args, all_info);
         if args.is_empty() {
             display(map, xml, all_info);
@@ -221,48 +188,86 @@ fn main() {
             // Create App with ALL options
             all_info = true;
             map = get_args_from_framework(&version_from_cli.unwrap(), &mut args, all_info);
-            let mut all_options: Vec<Arg> = Vec::with_capacity(map.len());
+            let mut all_options: Vec<Arg> = Vec::with_capacity(map.len() + 2);
             let mut my_index = 0;
             for param in map.keys() {
                 all_options.insert(
                     my_index,
                     Arg::with_name(&**param)
                         .long(param)
-                        //.allow_hyphen_values(true)
-                        .help("Get {param} from metadata")
                         .takes_value(false)
                         .required(false),
                 );
                 my_index += 1;
             }
+            all_options.insert(
+                map.len(),
+                Arg::with_name("api")
+                    .long("--api")
+                    .help("Choose API version to query metadata from")
+                    .takes_value(true)
+                    .required(false),
+            );
+            all_options.insert(
+                map.len() + 1,
+                Arg::with_name("xml")
+                    .long("--xml")
+                    .help("Show the output in XML format")
+                    .takes_value(false)
+                    .required(false),
+            );
             let mut my_app = App::new("metadata")
                 .version("0.1.0")
                 .author("Jesus")
                 .args(all_options);
-            let maxi_help = my_app.print_help();
-            let my_message: Vec<&str> = args.iter().map(String::as_str).collect();
-            let pert = format!(
-                "{}{} {}\n{}\n",
-                "Found argument ",
-                &my_message.concat(),
-                "which wasn't expected, or isn't valid in this context.",
-                "Please, check help above"
-            );
-            match maxi_help {
-                Ok(_helpa) => {
-                    Error::with_description(pert, clap::ErrorKind::UnknownArgument).exit()
-                }
-                Err(e) => println!("PUES ERROR {e:?}"),
-            }
+
+            my_app.get_matches_safe().unwrap_or_else(|e| e.exit());
         }
     } else {
         // metadata without params
-        //e.g. ec2metadata or ec2metadata --api <version>
+        // e.g. ec2metadata or ec2metadata --api <version>
         // use user version for API if any or latest
         // args.append(&mut vec![String::from("--api"), String::from("latest")]);
         all_info = true;
         map = get_args_from_framework(&version_from_cli.unwrap(), &mut args, all_info);
-        display(map, xml, all_info);
+        if !api_help && !package_version {
+            display(map, xml, all_info);
+        } else {
+            let mut all_options: Vec<Arg> = Vec::with_capacity(map.len() + 2);
+            let mut my_index = 0;
+            for param in map.keys() {
+                all_options.insert(
+                    my_index,
+                    Arg::with_name(&**param)
+                        .long(param)
+                        .takes_value(false)
+                        .required(false),
+                );
+                my_index += 1;
+            }
+            all_options.insert(
+                map.len(),
+                Arg::with_name("api")
+                    .long("--api")
+                    .help("Choose API version to query metadata from")
+                    .takes_value(true)
+                    .required(false),
+            );
+            all_options.insert(
+                map.len() + 1,
+                Arg::with_name("xml")
+                    .long("--xml")
+                    .help("Show the output in XML format")
+                    .takes_value(false)
+                    .required(false),
+            );
+            let mut my_app = App::new("metadata")
+                .version("0.1.0")
+                .author("Jesus")
+                .args(all_options);
+
+            my_app.get_matches();
+        }
     }
-    println!("Hello, world!");
+    // println!("Hello, world!");
 }
